@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neubrutal Chess</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&display=swap');
+
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+            background-color: #f0f0f0;
+        }
+
+        .neubrutal {
+            background: white;
+            border: 3px solid black;
+            box-shadow: 5px 5px 0px black;
+            transition: all 0.2s ease;
+        }
+
+        .neubrutal:hover {
+            transform: translate(-2px, -2px);
+            box-shadow: 7px 7px 0px black;
+        }
+
+        .chess-board {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 2px;
+            border: 3px solid black;
+            background: black;
+        }
+
+        .square {
+            aspect-ratio: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2.5rem;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .white {
+            background: #fff;
+        }
+
+        .black {
+            background: #6b7280;
+        }
+
+        .selected {
+            background: #93c5fd !important;
+        }
+
+        .valid-move {
+            background: #86efac !important;
+        }
+
+        @media (max-width: 768px) {
+            .chess-container {
+                flex-direction: column;
+            }
+            .side-panel {
+                width: 100% !important;
+            }
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+    <div class="max-w-7xl mx-auto">
+        <div class="flex justify-between mb-6">
+            <div class="neubrutal p-4">
+                <h2 class="text-xl font-bold">Black Score: <span id="blackScore">0</span></h2>
+            </div>
+            <div class="neubrutal p-4">
+                <h2 class="text-xl font-bold">White Score: <span id="whiteScore">0</span></h2>
+            </div>
+        </div>
+
+        <div class="chess-container flex flex-wrap gap-8">
+            <div class="flex-1 min-w-[320px]">
+                <div class="chess-board neubrutal" id="board"></div>
+                
+                <div class="mt-4 flex gap-2 flex-wrap">
+                    <button class="neubrutal px-4 py-2" onclick="newGame()">New Game</button>
+                    <button class="neubrutal px-4 py-2" onclick="undoMove()">Undo</button>
+                    <button class="neubrutal px-4 py-2" onclick="flipBoard()">Flip Board</button>
+                    <button class="neubrutal px-4 py-2" onclick="toggleAI()">Toggle AI</button>
+                </div>
+            </div>
+
+            <div class="side-panel w-80">
+                <div class="neubrutal p-4 mb-4">
+                    <h3 class="font-bold mb-2">Current Turn:</h3>
+                    <p id="currentTurn" class="text-lg">White to move</p>
+                </div>
+
+                <div class="neubrutal p-4">
+                    <h3 class="font-bold mb-2">Move History:</h3>
+                    <div id="moveHistory" class="h-[400px] overflow-y-auto"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let game = new Chess();
+        let board = document.getElementById('board');
+        let selectedSquare = null;
+        let boardFlipped = false;
+        let aiEnabled = false;
+        let pieceValues = {
+            'p': 1, 'n': 3, 'b': 3, 'r': 5, 'q': 9, 'k': 0
+        };
+
+        function createBoard() {
+            board.innerHTML = '';
+            let position = game.board();
+            if (boardFlipped) position.reverse();
+            
+            position.forEach((row, i) => {
+                if (boardFlipped) row.reverse();
+                row.forEach((piece, j) => {
+                    let square = document.createElement('div');
+                    square.className = `square ${((i + j) % 2 === 0) ? 'white' : 'black'}`;
+                    square.dataset.row = boardFlipped ? 7-i : i;
+                    square.dataset.col = boardFlipped ? 7-j : j;
+                    
+                    if (piece) {
+                        let color = piece.color === 'w' ? '&#x2658;' : '&#x265E;';
+                        let pieceSymbols = {
+                            'p': piece.color === 'w' ? '&#x2659;' : '&#x265F;',
+                            'n': piece.color === 'w' ? '&#x2658;' : '&#x265E;',
+                            'b': piece.color === 'w' ? '&#x2657;' : '&#x265D;',
+                            'r': piece.color === 'w' ? '&#x2656;' : '&#x265C;',
+                            'q': piece.color === 'w' ? '&#x2655;' : '&#x265B;',
+                            'k': piece.color === 'w' ? '&#x2654;' : '&#x265A;'
+                        };
+                        square.innerHTML = pieceSymbols[piece.type];
+                    }
+                    
+                    square.addEventListener('click', () => handleSquareClick(square));
+                    board.appendChild(square);
+                });
+            });
+            updateScore();
+            updateTurn();
+        }
+
+        function handleSquareClick(square) {
+            let row = parseInt(square.dataset.row);
+            let col = parseInt(square.dataset.col);
+            
+            if (selectedSquare) {
+                let startRow = parseInt(selectedSquare.dataset.row);
+                let startCol = parseInt(selectedSquare.dataset.col);
+                
+                let move = {
+                    from: algebraic(startRow, startCol),
+                    to: algebraic(row, col)
+                };
+
+                if (game.move(move)) {
+                    createBoard();
+                    updateMoveHistory();
+                    if (aiEnabled && !game.game_over()) {
+                        setTimeout(makeAIMove, 300);
+                    }
+                }
+                
+                clearHighlights();
+                selectedSquare = null;
+            } else {
+                let piece = game.get(algebraic(row, col));
+                if (piece && piece.color === (game.turn() === 'w' ? 'w' : 'b')) {
+                    selectedSquare = square;
+                    highlightSquare(square);
+                    highlightValidMoves(row, col);
+                }
+            }
+        }
+
+        function algebraic(row, col) {
+            return `${'abcdefgh'[col]}${8-row}`;
+        }
+
+        function highlightSquare(square) {
+            clearHighlights();
+            square.classList.add('selected');
+        }
+
+        function highlightValidMoves(row, col) {
+            let moves = game.moves({square: algebraic(row, col), verbose: true});
+            moves.forEach(move => {
+                let targetSquare = document.querySelector(`[data-row="${boardFlipped ? 7-'87654321'.indexOf(move.to[1]) : '87654321'.indexOf(move.to[1])}"][data-col="${boardFlipped ? 7-'abcdefgh'.indexOf(move.to[0]) : 'abcdefgh'.indexOf(move.to[0])}"]`);
+                if (targetSquare) targetSquare.classList.add('valid-move');
+            });
+        }
+
+        function clearHighlights() {
+            document.querySelectorAll('.square').forEach(sq => {
+                sq.classList.remove('selected', 'valid-move');
+            });
+        }
+
+        function updateScore() {
+            let blackScore = 0, whiteScore = 0;
+            game.board().forEach(row => {
+                row.forEach(piece => {
+                    if (piece) {
+                        if (piece.color === 'b') blackScore += pieceValues[piece.type];
+                        else whiteScore += pieceValues[piece.type];
+                    }
+                });
+            });
+            document.getElementById('blackScore').textContent = blackScore;
+            document.getElementById('whiteScore').textContent = whiteScore;
+        }
+
+        function updateTurn() {
+            document.getElementById('currentTurn').textContent = 
+                `${game.turn() === 'w' ? 'White' : 'Black'} to move${game.in_check() ? ' (Check!)' : ''}`;
+        }
+
+        function updateMoveHistory() {
+            let history = game.history({ verbose: true });
+            let html = history.map((move, i) => {
+                return `<div class="mb-1">
+                    ${Math.floor(i/2 + 1)}. ${i % 2 === 0 ? move.san : '... ' + move.san}
+                </div>`;
+            }).join('');
+            document.getElementById('moveHistory').innerHTML = html;
+        }
+
+        function newGame() {
+            game = new Chess();
+            selectedSquare = null;
+            createBoard();
+            document.getElementById('moveHistory').innerHTML = '';
+        }
+
+        function undoMove() {
+            game.undo();
+            if (aiEnabled) game.undo(); // Undo AI's move too
+            createBoard();
+            updateMoveHistory();
+        }
+
+        function flipBoard() {
+            boardFlipped = !boardFlipped;
+            createBoard();
+        }
+
+        function toggleAI() {
+            aiEnabled = !aiEnabled;
+            if (aiEnabled && game.turn() === 'b') {
+                makeAIMove();
+            }
+        }
+
+        function makeAIMove() {
+            let moves = game.moves();
+            if (moves.length > 0) {
+                let move = moves[Math.floor(Math.random() * moves.length)];
+                game.move(move);
+                createBoard();
+                updateMoveHistory();
+            }
+        }
+
+        // Initialize the game
+        createBoard();
+    </script>
+<script>document.body.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); return }, { passive: false })</script>
+	</body>
+</html>
